@@ -1,4 +1,5 @@
 import frappe
+from ts_tally_integration.tally_integration.utils.api.sync_settings import company_filters, company_sync_required
 from ts_tally_integration.tally_integration.utils.api.sync_settings import get_master_sync_limit
 import json
 from werkzeug.wrappers import Response
@@ -6,6 +7,7 @@ from datetime import datetime
 
 
 @frappe.whitelist()
+@company_sync_required("STOCKGROUPS")
 def get_itemgroup(company_id=None):
     if not company_id:
         return Response(json.dumps({"status": False, "message": "Company ID not found"}), content_type="application/json")

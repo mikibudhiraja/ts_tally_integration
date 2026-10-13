@@ -1,4 +1,5 @@
 import frappe
+from ts_tally_integration.tally_integration.utils.api.sync_settings import company_filters, company_sync_required
 from ts_tally_integration.tally_integration.utils.api.sync_settings import get_master_sync_limit
 import json
 from datetime import datetime
@@ -6,6 +7,7 @@ from werkzeug.wrappers import Response
 from frappe.utils import get_datetime
 
 @frappe.whitelist()
+@company_sync_required("STOCKITEMS")
 def get_item(company_id = None):
     if company_id == None:
         return Response(json.dumps("Company number not found!", default=str), content_type='application/json')
@@ -21,11 +23,11 @@ def get_item(company_id = None):
 
         return Response(json.dumps(final_voucher, default=str), content_type='application/json')
 
-    company_name = frappe.get_value('TS Tally Company', {'company_number': company_id}, ['company_name'])
+    company_name = frappe.get_value('TS Tally Company', company_filters(company_id), ['company_name'])
 
     all_doc = []
 
-    sync_master_from = frappe.get_value('TS Tally Company',{'company_number': company_id},'sync_master_from')
+    sync_master_from = frappe.get_value('TS Tally Company',company_filters(company_id),'sync_master_from')
 
     start_date = get_datetime(sync_master_from)
 

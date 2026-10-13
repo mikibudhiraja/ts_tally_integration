@@ -1,4 +1,5 @@
 import frappe
+from ts_tally_integration.tally_integration.utils.api.sync_settings import company_filters, company_sync_required
 from ts_tally_integration.tally_integration.utils.api.sync_settings import get_voucher_sync_limit
 from datetime import datetime
 import json
@@ -23,15 +24,16 @@ def _get_address_details(address_doc):
 
 
 @frappe.whitelist()
+@company_sync_required("VOUCHER")
 def get_purchsase_receipt(company_id=None):
     if not company_id:
         return Response(json.dumps({'status': False, 'message': 'Company Number not found!'}), content_type='application/json')
 
-    stock = frappe.get_value('TS Tally Company', {'company_number': company_id}, ['stock'])
+    stock = frappe.get_value('TS Tally Company', company_filters(company_id), ['stock'])
     if stock == 'Non-Inventory':
         return Response(json.dumps({"status": True, "VOUCHERDETAILS": {"VOUCHER": []}}), content_type='application/json')
 
-    company_name = frappe.get_value('TS Tally Company', {'company_number': company_id}, 'company_name')
+    company_name = frappe.get_value('TS Tally Company', company_filters(company_id), 'company_name')
     company_gst = frappe.get_value('Company', {'name': company_name}, 'gstin')
 
     all_vouchers = []

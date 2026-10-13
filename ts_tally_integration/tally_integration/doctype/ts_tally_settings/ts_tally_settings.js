@@ -39,6 +39,15 @@ function set_cost_center_for_company(frm) {
 frappe.ui.form.on('TS Tally Company', {
     company_name: function (frm, cdt, cdn) {
         frappe.model.set_value(cdt, cdn, 'cost_center', '');
+    },
+    sync: function (frm, cdt, cdn) {
+        // Only one company row may sync: ticking one unticks the rest.
+        if (!locals[cdt][cdn].sync) return;
+        (frm.doc.company_table || []).forEach(row => {
+            if (row.name !== cdn && row.sync) {
+                frappe.model.set_value(row.doctype, row.name, 'sync', 0);
+            }
+        });
     }
 });
 
@@ -113,11 +122,13 @@ function fetch_not_synced_data(frm) {
             let html = '';
             for (let doctype in r.message) {
                 let records = r.message[doctype];
-                let columns = Object.keys(records[0]);
+                // Keys starting with "_" are hints, not columns (e.g. _doctype for the link).
+                let columns = Object.keys(records[0]).filter(col => !col.startsWith('_'));
+                const blocked = doctype.includes('Will Not Sync');
 
                 html += `
                     <div style="margin-bottom:20px;">
-                        <h4 style="background:rgb(183, 220, 255); padding:8px; margin-bottom:0;">
+                        <h4 style="background:${blocked ? 'rgb(255, 205, 205)' : 'rgb(183, 220, 255)'}; padding:8px; margin-bottom:0;">
                             ${doctype} (${records.length} records)
                         </h4>
                         <table class="table table-bordered" style="width:100%; border-collapse:collapse;">
@@ -137,7 +148,7 @@ function fetch_not_synced_data(frm) {
                     columns.forEach(col => {
                         let val = row[col] || '';
                         if (col === 'name') {
-                            val = `<a href="/app/${frappe.router.slug(doctype)}/${row[col]}" target="_blank">${row[col]}</a>`;
+                            val = `<a href="/app/${frappe.router.slug(row._doctype || doctype)}/${row[col]}" target="_blank">${row[col]}</a>`;
                         } else if (date_cols.has(col) && row[col]) {
                             val = frappe.datetime.str_to_user(row[col]);
                         }

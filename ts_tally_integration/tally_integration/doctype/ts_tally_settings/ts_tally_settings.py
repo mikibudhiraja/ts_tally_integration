@@ -6,7 +6,7 @@ from frappe.model.document import Document
 from frappe.core.doctype.user.user import generate_keys
 from frappe.utils import get_url
 from frappe.permissions import add_permission
-from frappe.utils import getdate
+from frappe.utils import flt, getdate
 
 
 class TSTallySettings(Document):
@@ -27,6 +27,13 @@ class TSTallySettings(Document):
                     f"Row {i.idx}: Sync From date ({sync_from_date}) must be between "
                     f"{year_start_date} and {year_end_date} for Fiscal Year {i.fiscal_year}"
                 )
+
+        synced_rows = [str(i.idx) for i in doc.company_table if i.sync]
+        if len(synced_rows) > 1:
+            frappe.throw(
+                f"Sync can be ticked on only one company row; it is ticked on rows "
+                f"{', '.join(synced_rows)}."
+            )
 
 
 
@@ -296,7 +303,78 @@ def get_not_synced_data(company):
 	# if not_synced_dn:
 	# 	result["Delivery Note"] = not_synced_dn
 
-	return result
+	# Vouchers Tally will reject: an item row without a GST rate makes the
+	# ledger name "Sales @ None" / "Purchase @ None". Listed first.
+	blocked = {}
+	for doctype, party_field, title in (
+		("Sales Invoice", "customer_name", "Sales Invoice / Credit Note - Will Not Sync (Item Without GST Rate)"),
+		("Purchase Invoice", "supplier_name", "Purchase Invoice / Debit Note - Will Not Sync (Item Without GST Rate)"),
+	):
+		rows = get_invoices_without_gst_rate(doctype, party_field, with_cost_center({
+			"custom_tally_guid": ["is", "not set"],
+			"company": company,
+			"docstatus": 1,
+			"is_opening": ["!=", "Yes"],
+			"posting_date": posting_date_filter
+		}))
+		if rows:
+			blocked[title] = rows
+
+	return {**blocked, **result}
+
+
+def get_invoices_without_gst_rate(doctype, party_field, filters):
+	"""Pending invoices with an item row that has no SGST/IGST rate and is not
+	Exempted, i.e. no Item Tax Template. The Tally ledger name for such a row
+	ends in "@ None", so Tally rejects the voucher."""
+	invoices = frappe.get_all(
+		doctype,
+		filters=filters,
+		fields=["name", party_field, "is_return", "cost_center", "posting_date", "grand_total"],
+		order_by="posting_date desc"
+	)
+	if not invoices:
+		return []
+
+	items = frappe.get_all(
+		f"{doctype} Item",
+		filters={"parent": ["in", [d.name for d in invoices]], "parenttype": doctype},
+		fields=["parent", "item_code", "sgst_rate", "igst_rate", "gst_treatment"],
+		order_by="idx asc"
+	)
+	items_without_rate = {}
+	for item in items:
+		if not flt(item.sgst_rate) and not flt(item.igst_rate) and item.gst_treatment != "Exempted":
+			codes = items_without_rate.setdefault(item.parent, [])
+			if item.item_code not in codes:
+				codes.append(item.item_code)
+
+	# The "@ rate" ledger line is built from the voucher's GL entries, so an
+	# invoice with nothing posted (e.g. zero value) never sends "@ None".
+	if items_without_rate:
+		posted = set(frappe.get_all(
+			"GL Entry",
+			filters={"voucher_type": doctype, "voucher_no": ["in", list(items_without_rate)], "is_cancelled": 0},
+			pluck="voucher_no",
+			distinct=True
+		))
+		items_without_rate = {k: v for k, v in items_without_rate.items() if k in posted}
+
+	return_label = "Credit Note" if doctype == "Sales Invoice" else "Debit Note"
+	return [
+		{
+			"name": d.name,
+			"_doctype": doctype,
+			"type": return_label if d.is_return else doctype,
+			party_field: d.get(party_field),
+			"cost_center": d.cost_center,
+			"posting_date": d.posting_date,
+			"grand_total": d.grand_total,
+			"items_without_gst_rate": ", ".join(items_without_rate[d.name]),
+		}
+		for d in invoices
+		if d.name in items_without_rate
+	]
 
 
 @frappe.whitelist()
