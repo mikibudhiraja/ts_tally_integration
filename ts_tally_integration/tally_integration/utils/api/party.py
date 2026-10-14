@@ -1,4 +1,5 @@
 import frappe
+from ts_tally_integration.tally_integration.utils.api.sync_settings import company_filters, company_sync_required
 from ts_tally_integration.tally_integration.utils.api.sync_settings import get_master_sync_limit
 import json
 from datetime import datetime
@@ -7,6 +8,7 @@ from frappe.utils import get_datetime
 
 
 @frappe.whitelist()
+@company_sync_required("LEDGER")
 def get_party(company_id = None):
 
     if company_id == None:
@@ -59,7 +61,7 @@ def get_party(company_id = None):
         all_doc.append(supplier_dict)
 
 
-    sync_master_from = frappe.get_value('TS Tally Company',{'company_number': company_id},'sync_master_from')
+    sync_master_from = frappe.get_value('TS Tally Company',company_filters(company_id),'sync_master_from')
 
     start_date = get_datetime(sync_master_from)
 

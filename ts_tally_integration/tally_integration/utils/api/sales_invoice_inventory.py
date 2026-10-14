@@ -1,4 +1,5 @@
 import frappe, importlib
+from ts_tally_integration.tally_integration.utils.api.sync_settings import company_filters, company_sync_required
 from ts_tally_integration.tally_integration.utils.api.sync_settings import get_voucher_sync_limit
 from datetime import datetime
 import json
@@ -28,6 +29,7 @@ EMPTY_ADDRESS = {
 
 
 @frappe.whitelist()
+@company_sync_required("VOUCHER")
 def get_sales_inv(company_id=None):
     redirect_record = frappe.get_value(
         'Tally Different Function',
@@ -53,7 +55,7 @@ def get_sales_inv(company_id=None):
         if company_id == None:
             return Response(json.dumps('Company Number not found!', default=str), content_type='application/json')
 
-        stock = frappe.get_value('TS Tally Company', {'company_number': company_id}, ['stock'])
+        stock = frappe.get_value('TS Tally Company', company_filters(company_id), ['stock'])
         if stock == 'Non-Inventory':
             empty = ({
                 "status": True,
@@ -73,8 +75,8 @@ def get_sales_inv(company_id=None):
                 }
             return Response(json.dumps(final_voucher, default=str), content_type='application/json')
 
-        company_name = frappe.get_value('TS Tally Company', {'company_number': company_id}, ['company_name'])
-        cost_center = frappe.get_value('TS Tally Company', {'company_number': company_id}, ['cost_center'])
+        company_name = frappe.get_value('TS Tally Company', company_filters(company_id), ['company_name'])
+        cost_center = frappe.get_value('TS Tally Company', company_filters(company_id), ['cost_center'])
         default_warehouse = frappe.db.get_single_value('TS Tally Settings', 'default_warehouse')
 
         company_address_link = frappe.get_all('Dynamic Link', filters={'link_doctype': 'Company', 'link_name': company_name}, fields=['parent'])
@@ -88,10 +90,10 @@ def get_sales_inv(company_id=None):
 
         all_vouchers = []
 
-        sync_from = frappe.get_value('TS Tally Company',{'company_number': company_id},'sync_from')
+        sync_from = frappe.get_value('TS Tally Company',company_filters(company_id),'sync_from')
 
         start_date = getdate(sync_from)
-        sync_to = frappe.get_value('TS Tally Company', {'company_number': company_id}, 'sync_to')
+        sync_to = frappe.get_value('TS Tally Company', company_filters(company_id), 'sync_to')
         end_date = getdate(sync_to) if sync_to else getdate(today())
         sales_filters = {'company':company_name, 'is_return':0, 'docstatus':1, 'is_opening': 'No',
                                              'custom_tally_guid': ['is', 'not set'], 'posting_date': ['between', [start_date, end_date]]}

@@ -1,10 +1,12 @@
 import frappe
+from ts_tally_integration.tally_integration.utils.api.sync_settings import company_filters, company_sync_required
 from ts_tally_integration.tally_integration.utils.api.sync_settings import get_master_sync_limit
 import json
 from datetime import datetime
 from werkzeug.wrappers import Response
 
 @frappe.whitelist()
+@company_sync_required("GODOWNS")
 def get_warehouse(company_id = None):
     if company_id == None:
         return Response(json.dumps("Company number not found!", default=str), content_type='application/json')
@@ -21,7 +23,7 @@ def get_warehouse(company_id = None):
             }
         return Response(json.dumps(final_voucher, default=str), content_type='application/json')
 
-    company_name = frappe.get_value('TS Tally Company', {'company_number': company_id}, ['company_name'])
+    company_name = frappe.get_value('TS Tally Company', company_filters(company_id), ['company_name'])
 
     synced_warehouses = frappe.get_all('Tally Master Sync Log',
         filters={'parenttype': 'Warehouse', 'company_number': company_id, 'status': 'SUCCESS'},

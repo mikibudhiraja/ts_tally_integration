@@ -1,4 +1,5 @@
 import frappe
+from ts_tally_integration.tally_integration.utils.api.sync_settings import company_filters, company_sync_required
 from ts_tally_integration.tally_integration.utils.api.sync_settings import get_voucher_sync_limit
 from datetime import datetime
 import json
@@ -7,6 +8,7 @@ from frappe.utils import getdate, today
 
 
 @frappe.whitelist()
+@company_sync_required("VOUCHER")
 def get_stock_entry(company_id=None):
     import json
     from frappe.utils.response import Response
@@ -15,7 +17,7 @@ def get_stock_entry(company_id=None):
     if not company_id:
         return Response(json.dumps('Company Number not found!', default=str), content_type='application/json')
 
-    stock = frappe.get_value('TS Tally Company', {'company_number': company_id}, 'stock')
+    stock = frappe.get_value('TS Tally Company', company_filters(company_id), 'stock')
     if stock == 'Non-Inventory':
         return Response(json.dumps({
             "status": True,
@@ -34,15 +36,15 @@ def get_stock_entry(company_id=None):
             }
         return Response(json.dumps(final_voucher, default=str), content_type='application/json')
 
-    company_name = frappe.get_value('TS Tally Company', {'company_number': company_id}, 'company_name')
+    company_name = frappe.get_value('TS Tally Company', company_filters(company_id), 'company_name')
 
 
     all_vouchers = []
 
-    sync_from = frappe.get_value('TS Tally Company',{'company_number': company_id},'sync_from')
+    sync_from = frappe.get_value('TS Tally Company',company_filters(company_id),'sync_from')
 
     start_date = getdate(sync_from)
-    sync_to = frappe.get_value('TS Tally Company', {'company_number': company_id}, 'sync_to')
+    sync_to = frappe.get_value('TS Tally Company', company_filters(company_id), 'sync_to')
     end_date = getdate(sync_to) if sync_to else getdate(today())
 
     stock_entries = frappe.get_all('Stock Entry',
