@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from werkzeug.wrappers import Response
 from frappe.utils import getdate, today
+from ts_tally_integration.tally_integration.utils.api.ledger_items import items_without_own_ledger
 
 
 DEFAULT_COST_CATEGORY = "Primary Cost Category"
@@ -86,6 +87,7 @@ def credit_note_inv(company_id = None):
         for doc in credit_list:
 
             tax_processed = False
+            items_processed = False
 
             if doc.customer_address:
                 cus_address = frappe.get_all('Address', filters={'name': doc.customer_address}, fields=['*'])
@@ -117,11 +119,19 @@ def credit_note_inv(company_id = None):
                 account_type = frappe.get_value('Account', ledger['account'], 'account_type')
 
                 if account_type == 'Income Account':
+                    # Item lines cover every item at once; a second such GL row
+                    # must not repeat them.
+                    if items_processed:
+                        continue
+                    items_processed = True
                     ledgername = ledger['account']
 
                     tally_parent = frappe.get_value('Account', ledgername, 'custom_tally_parent_account')
 
                     sales_item = frappe.get_all('Sales Invoice Item', filters={'parent':doc.name}, fields=['*'])
+                    # Items booked to an account sent as its own ledger line below
+                    # would otherwise be counted twice, leaving Dr and Cr unequal.
+                    sales_item = items_without_own_ledger(sales_item, 'income_account', ('Bank', 'Expense Account', 'Direct Expense', 'Indirect Expense', 'Chargeable'))
 
                     for item in sales_item:
                         hsn_desc = frappe.get_value('GST HSN Code', {'name': item.get('gst_hsn_code')}, 'description')

@@ -17,6 +17,31 @@ def get_tally_cost_category(doc):
     return DEFAULT_COST_CATEGORY if get_tally_cost_center(doc) else ""
 
 
+NON_EXPENSE_LEDGER_TYPES = (
+    "Tax", "Bank", "Payable", "Chargeable", "Round Off",
+    "Stock In Hand", "Cost of Goods Sold",
+    "Stock Received But Not Billed", "Stock Adjustment",
+    "Expenses Included In Valuation",
+    "Expenses Included In Asset Valuation",
+)
+
+
+def posted_as_own_ledger(account):
+    """True when the GL row for `account` is sent by the Fixed Asset,
+    Chargeable or expense branch of get_purchase_invoice rather than as a stock
+    item line."""
+    if not account:
+        return False
+    info = frappe.db.get_value('Account', account, ['account_type', 'root_type'], as_dict=True) or {}
+    account_type = info.get('account_type')
+    if account_type in ('Bank', 'Fixed Asset', 'Chargeable'):
+        return True
+    return (
+        account_type in ("Expense Account", "Indirect Expense", "Direct Expense", "Depreciation")
+        or (info.get('root_type') == "Expense" and account_type not in NON_EXPENSE_LEDGER_TYPES)
+    )
+
+
 @frappe.whitelist()
 @company_sync_required("VOUCHER")
 def get_purchase_invoice(company_id=None):
@@ -71,6 +96,7 @@ def get_purchase_invoice(company_id=None):
 
     for doc in purchase_list:
         tax_processed = False
+        items_processed = False
         if doc.supplier_address:
             cus_address = frappe.get_all('Address', filters={'name': doc.supplier_address}, fields=['*'])
         else:
@@ -102,6 +128,11 @@ def get_purchase_invoice(company_id=None):
             root_type = account_info.get('root_type')
             account = (invoice.get("account") or "").split(" - ")[0]
             if account in ["Stock In Hand", "Cost of Goods Sold", "Stock Received But Not Billed",]:
+                # The stock lines cover every stock item at once, so a second
+                # stock GL row must not repeat them.
+                if items_processed:
+                    continue
+                items_processed = True
 
                 ledgername = invoice['account']
                 parent_account = frappe.get_value('Account', invoice['account'], 'custom_tally_parent_account')
@@ -109,6 +140,13 @@ def get_purchase_invoice(company_id=None):
                 ledger_suffix = None
 
                 purchase_item = frappe.get_all('Purchase Invoice Item', filters={'parent':doc.name}, fields=['*'])
+                # Items booked to an expense or fixed asset account already go out
+                # as that account's own ledger line below; listing them here as
+                # well counted them twice and left Dr above Cr.
+                purchase_item = [
+                    item for item in purchase_item
+                    if not posted_as_own_ledger(item.get('expense_account'))
+                ]
 
                 taxes = frappe.db.get_all(
                     "Purchase Taxes and Charges",
