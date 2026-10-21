@@ -5,6 +5,7 @@ from datetime import datetime
 import json
 from werkzeug.wrappers import Response
 from frappe.utils import getdate, today
+from ts_tally_integration.tally_integration.utils.api.ledger_items import items_without_own_ledger
 
 
 DEFAULT_COST_CATEGORY = "Primary Cost Category"
@@ -69,6 +70,7 @@ def get_purchase_invoice(company_id=None):
 
     for doc in purchase_list:
         tax_processed = False
+        items_processed = False
         if doc.supplier_address:
             cus_address = frappe.get_all('Address', filters={'name': doc.supplier_address}, fields=['*'])
         else:
@@ -99,6 +101,11 @@ def get_purchase_invoice(company_id=None):
 
             account = (invoice.get("account") or "").split(" - ")[0]
             if account in ["Stock In Hand","Cost of Goods Sold","Stock Received But Not Billed",]:
+                # Item lines cover every item at once; a second such GL row
+                # must not repeat them.
+                if items_processed:
+                    continue
+                items_processed = True
 
                 ledgername = invoice['account']
                 parent_account = frappe.get_value('Account', invoice['account'], 'custom_tally_parent_account')
@@ -106,6 +113,9 @@ def get_purchase_invoice(company_id=None):
                 ledger_suffix = None
 
                 purchase_item = frappe.get_all('Purchase Invoice Item', filters={'parent':doc.name}, fields=['*'])
+                # Items booked to an account sent as its own ledger line below
+                # would otherwise be counted twice, leaving Dr and Cr unequal.
+                purchase_item = items_without_own_ledger(purchase_item, 'expense_account', ('Bank', 'Fixed Asset', 'Expense Account', 'Chargeable'))
 
                 for item in purchase_item:
                     hsn_desc = frappe.get_value('GST HSN Code', {'name': item.get('gst_hsn_code')}, 'description')
